@@ -71,3 +71,6 @@ _ReSharper*/
 
 # Visual Studio History (VSHistory) files
 .vshistory/
+ApimSample.Api/Properties/PublishProfiles/
+ApimSample.MvcClient/Properties/PublishProfiles/
+ApimSample.ApimSecuredApi/Properties/PublishProfiles/
