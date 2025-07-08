@@ -1,0 +1,58 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Direct Auth API",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build-api",
+            "program": "${workspaceFolder}/ApimSample.Api/bin/Debug/net8.0/ApimSample.Api.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/ApimSample.Api",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            }
+        },
+        {
+            "name": "APIM Auth API",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build-apim-secured-api",
+            "program": "${workspaceFolder}/ApimSample.ApimSecuredApi/bin/Debug/net8.0/ApimSample.ApimSecuredApi.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/ApimSample.ApimSecuredApi",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            }
+        },
+        {
+            "name": "MVC Client",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build-mvc",
+            "program": "${workspaceFolder}/ApimSample.MvcClient/bin/Debug/net8.0/ApimSample.MvcClient.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/ApimSample.MvcClient",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            }
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Direct Auth API + MVC Client",
+            "configurations": ["Direct Auth API", "MVC Client"]
+        },
+        {
+            "name": "APIM Auth API + MVC Client",
+            "configurations": ["APIM Auth API", "MVC Client"]
+        },
+        {
+            "name": "All Projects",
+            "configurations": ["Direct Auth API", "APIM Auth API", "MVC Client"]
+        }
+    ]
+}
