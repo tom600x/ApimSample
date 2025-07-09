@@ -8,6 +8,59 @@ This sample demonstrates two approaches to securing APIs with OAuth 2.0 in Azure
 - **ApimSample.ApimSecuredApi**: .NET Core 8.0 Web API with security handled by APIM (APIM Auth)
 - **ApimSample.MvcClient**: .NET Core 8.0 MVC client application that calls both APIs through Azure API Management
 
+## Authentication Approaches
+
+This sample demonstrates two distinct approaches for implementing OAuth 2.0 authentication with Azure API Management:
+
+### 1. Direct Auth (ApimSample.Api)
+
+In this approach:
+- The API has built-in authentication middleware to validate JWT tokens
+- API Management passes the OAuth token through to the API 
+- The API itself performs token validation
+- Appropriate for scenarios where you need fine-grained control over authentication within your API
+
+```
+┌─────────┐     Authorization    ┌─────────┐    JWT Token    ┌────────────┐    JWT Token    ┌──────────┐
+│  User   │ ─────────────────────> Azure AD <────────────────┤ API Client │────────────────> API Mgmt  │
+└─────────┘                      └─────────┘                 └────────────┘                 └─────┬────┘
+                                                                                                 │
+                                                                                                 │ JWT Token
+                                                                                                 │ (pass-through)
+                                                                                                 │
+                                                                                                 ▼
+                                                                                            ┌──────────┐
+                                                                                            │  API     │
+                                                                                            │(validates│
+                                                                                            │  token)  │
+                                                                                            └──────────┘
+```
+
+### 2. APIM Auth (ApimSample.ApimSecuredApi)
+
+In this approach:
+- The API has no built-in authentication logic
+- API Management validates the JWT tokens using policies
+- The API receives pre-validated requests
+- Appropriate for scenarios where you want to centralize authentication or have multiple APIs that need the same security
+
+```
+┌─────────┐     Authorization    ┌─────────┐    JWT Token    ┌────────────┐    JWT Token    ┌──────────┐
+│  User   │ ─────────────────────> Azure AD <────────────────┤ API Client │────────────────> API Mgmt  │
+└─────────┘                      └─────────┘                 └────────────┘                 │(validates│
+                                                                                            │  token)  │
+                                                                                            └─────┬────┘
+                                                                                                  │
+                                                                                                  │ Pre-validated
+                                                                                                  │ request
+                                                                                                  ▼
+                                                                                            ┌──────────┐
+                                                                                            │  API     │
+                                                                                            │  (no     │
+                                                                                            │ auth)    │
+                                                                                            └──────────┘
+```
+
 ## Prerequisites
 
 - Azure subscription
@@ -18,121 +71,169 @@ This sample demonstrates two approaches to securing APIs with OAuth 2.0 in Azure
 
 ### 1. Create Azure AD App Registrations
 
-#### API Registration
+You'll need to create three app registrations:
 
-1. Sign in to the [Azure Portal](https://portal.azure.com)
-2. Navigate to **Azure Active Directory** > **App registrations** > **New registration**
-3. Enter the following details:
+#### A. Direct Auth API Registration (ApimSample.Api)
+
+1. Navigate to **Azure Active Directory** > **App registrations** > **New registration**
+2. Enter details:
    - **Name**: `ApimSample.Api`
    - **Supported account types**: Accounts in this organizational directory only (Single tenant)
-   - **Redirect URI**: (Leave blank for now)
-4. Click **Register**
-5. Note down the **Application (client) ID** and **Directory (tenant) ID**
-6. Go to **Expose an API** > **Add a scope**:
-   - **Application ID URI**: Click **Set** to use the default `api://{clientId}`
+3. Click **Register** and note the **Client ID** and **Tenant ID**
+4. Go to **Expose an API** > **Add a scope**:
+   - Set Application ID URI to default `api://{clientId}`
    - **Scope name**: `weather.read`
    - **Admin consent display name**: `Read Weather Data`
    - **Admin consent description**: `Allows reading weather forecast data`
    - **State**: Enabled
-7. Click **Add scope**
 
-#### Client Registration (for Swagger UI)
+#### B. APIM Auth API Registration (ApimSample.ApimSecuredApi)
 
 1. Navigate to **Azure Active Directory** > **App registrations** > **New registration**
-2. Enter the following details:
+2. Enter details:
+   - **Name**: `ApimSample.ApimSecuredApi`
+   - **Supported account types**: Accounts in this organizational directory only (Single tenant)
+3. Click **Register** and note the **Client ID** and **Tenant ID**
+4. Go to **Expose an API** > **Add a scope**:
+   - Set Application ID URI to default `api://{clientId}`
+   - **Scope name**: `weather.read`
+   - **Admin consent display name**: `Read Weather Data` 
+   - **Admin consent description**: `Allows reading weather forecast data`
+   - **State**: Enabled
+
+#### C. Client Application Registration (for Swagger UI testing)
+
+1. Navigate to **Azure Active Directory** > **App registrations** > **New registration**
+2. Enter details:
    - **Name**: `ApimSample.Swagger`
    - **Supported account types**: Accounts in this organizational directory only (Single tenant)
-   - **Redirect URI**: Web > `https://your-api-url/swagger/oauth2-redirect.html` (replace with your actual API URL)
-3. Click **Register**
-4. Note down the **Application (client) ID**
-5. Go to **Authentication**, and ensure **Implicit grant and hybrid flows** has **Access tokens** and **ID tokens** checked
-6. Go to **API permissions** > **Add a permission**:
+   - **Redirect URI**: Web > `https://localhost:XXXX/swagger/oauth2-redirect.html` (replace XXXX with your local port)
+3. Click **Register** and note the **Client ID**
+4. Go to **Authentication** and enable **Implicit grant** for **Access tokens** and **ID tokens**
+5. Go to **API permissions** > **Add a permission**:
    - Select **My APIs** > **ApimSample.Api**
-   - Select **Delegated permissions** > **weather.read**
+   - Select **weather.read**
+   - Click **Add permissions**
+6. Repeat for the APIM Auth API:
+   - Select **My APIs** > **ApimSample.ApimSecuredApi**
+   - Select **weather.read**
    - Click **Add permissions**
 7. Go to **Certificates & secrets** > **New client secret**:
-   - Enter a description and select expiration
-   - Note down the **Secret Value** (only visible once)
+   - Add a description and select expiration
+   - Note down the secret value (visible only once)
 
-### 2. Configure the API Project
+### 2. Configure API Projects
 
-Update the `appsettings.json` in the API project:
+#### A. Configure Direct Auth API (ApimSample.Api)
 
+1. Update `appsettings.json`:
 ```json
 {
   "Authentication": {
     "Authority": "https://login.microsoftonline.com/YOUR_TENANT_ID",
-    "Audience": "api://YOUR_API_CLIENT_ID",
+    "Audience": "api://YOUR_DIRECT_AUTH_CLIENT_ID",
     "SwaggerClientId": "YOUR_SWAGGER_CLIENT_ID"
   }
 }
 ```
+
+2. Make sure `Program.cs` uses these configuration values:
+```csharp
+options.Authority = builder.Configuration["Authentication:Authority"];
+options.Audience = builder.Configuration["Authentication:Audience"];
+```
+
+3. Update Swagger OAuth configuration to use these values:
+```csharp
+// Replace hardcoded client ID with configuration
+string apiClientId = builder.Configuration["Authentication:Audience"]?.Replace("api://", "");
+c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+{
+    // ...other properties...
+    Flows = new OpenApiOAuthFlows
+    {
+        Implicit = new OpenApiOAuthFlow
+        {
+            // ...other properties...
+            Scopes = new Dictionary<string, string>
+            {
+                { $"api://{apiClientId}/weather.read", "Read weather data" }
+            }
+        }
+    }
+});
+```
+
+#### B. Configure APIM Auth API (ApimSample.ApimSecuredApi)
+
+No special configuration needed in the API itself as authentication will be handled by APIM policies.
 
 ### 3. Create and Configure Azure API Management
 
 1. In the Azure portal, create a new **API Management** service
 2. After deployment, navigate to your API Management service
 
-#### Configure OAuth 2.0 Service in API Management
+### 4. Configure OAuth 2.0 Services in API Management
+
+You'll need to create TWO OAuth 2.0 services:
+
+#### A. OAuth 2.0 Service for Direct Auth API
 
 1. Go to **Developer portal** > **OAuth 2.0 + OpenID Connect**
-2. Click **Add** to create a new OAuth 2.0 service
-3. Enter the following details:
-   - **Display name**: `ApimSample OAuth` (required)
-   - **Id**: `apimsample-oauth` (required - this is your OAuth server identifier)
-   - **Description**: `Authorization server description`
-   - **Client registration page URL**: `https://portal.azure.com` (required - cannot be left blank, use Azure portal URL as a placeholder)
+2. Click **Add** and enter:
+   - **Display name**: `Direct Auth OAuth` 
+   - **Id**: `direct-auth-oauth`
+   - **Client registration page URL**: `https://portal.azure.com` (placeholder)
    - **Authorization grant types**: `Authorization code`
-   - **Authorization endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/authorize` (required)
-   - **Token endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token` (required)
-   - **Default scope**: `api://YOUR_API_CLIENT_ID/weather.read` (the scope you created in your Azure AD app registration)
-   - **Support state parameter**: Checked
-   - **Client authentication methods**: `In the body` (the location where client credentials are sent)
-   - **Access token sending method**: `Authorization header` (how the token is sent to your API)
-4. Click **Create** to save the OAuth 2.0 service configuration
+   - **Authorization endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/authorize`
+   - **Token endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token`
+   - **Default scope**: `api://YOUR_DIRECT_AUTH_CLIENT_ID/weather.read`
+   - **Client authentication methods**: `In the body`
+   - **Client ID**: Your Swagger client ID
+   - **Client secret**: Your Swagger client secret
 
-#### Configure Client Credentials
+#### B. OAuth 2.0 Service for APIM Auth API
 
-Once the OAuth 2.0 service is created, you'll need to add your client credentials:
+1. Go to **Developer portal** > **OAuth 2.0 + OpenID Connect**
+2. Click **Add** and enter:
+   - **Display name**: `APIM Auth OAuth`
+   - **Id**: `apim-auth-oauth`
+   - **Client registration page URL**: `https://portal.azure.com` (placeholder)
+   - **Authorization grant types**: `Authorization code`
+   - **Authorization endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/authorize`
+   - **Token endpoint URL**: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token`
+   - **Default scope**: `api://YOUR_APIM_AUTH_CLIENT_ID/weather.read`
+   - **Client authentication methods**: `In the body`
+   - **Client ID**: Your Swagger client ID
+   - **Client secret**: Your Swagger client secret
 
-1. Fill in the following details:
-   - **Client ID**: `YOUR_CLIENT_ID` (from your Azure AD client app registration)
-   - **Client secret**: `YOUR_CLIENT_SECRET` (from your Azure AD client app registration)
-   - **Redirect URI**: The redirect URI configured in your Azure AD app registration (e.g., your MVC client callback URL)
-   - **Authorization code grant flow**: URL provided by API Management (copy this for your client application)
-   - **Implicit grant flow**: URL provided by API Management (if using implicit flow)
+### 5. Import and Configure APIs in API Management
 
-#### Configure Direct Auth API (API validates tokens)
+#### A. Import Direct Auth API
 
 1. Go to **APIs** > **Add API** > **OpenAPI**
-2. Enter the Direct Auth API's Swagger URL (e.g., `https://your-api-url/swagger/v1/swagger.json`)
+2. Enter the Swagger URL of your Direct Auth API
 3. Set the **API URL suffix** to `direct-auth`
 4. Click **Create**
-5. Go to **APIs** > Select your Direct Auth API > **Settings**
-6. Under **Security** section, for **User authorization**, select the radio button for **OAuth 2.0**
-7. For the **OAuth 2.0 server** dropdown, select the OAuth 2.0 server you created earlier (`ApimSample OAuth`)
-   - This dropdown will show the OAuth 2.0 servers you've configured in the Developer Portal section
-   - If you don't see your server in the dropdown, go back to the Developer Portal section and make sure you've created the OAuth 2.0 server correctly
-8. If needed, check the **Override scope** option to specify a custom scope
-9. Click **Save**
+5. Go to **Settings** and under **Security** section:
+   - Select **OAuth 2.0** for User authorization
+   - Select the **Direct Auth OAuth** server you created
+   - Leave other settings as default (this API validates tokens itself)
+6. Click **Save**
 
-#### Configure APIM Auth API (APIM validates tokens)
+#### B. Import APIM Auth API
 
 1. Go to **APIs** > **Add API** > **OpenAPI**
-2. Enter the APIM Auth API's Swagger URL (e.g., `https://your-apim-secured-api-url/swagger/v1/swagger.json`)
+2. Enter the Swagger URL of your APIM Auth API
 3. Set the **API URL suffix** to `apim-auth`
 4. Click **Create**
-
-5. Configure OAuth 2.0 validation using an inbound policy:
-   - Go to **APIs** > Select the APIM Auth API > **Inbound processing**
-   - Click the **</>** (code editor) button
-   - Add the following policy inside the `<inbound>` section:
-
+5. Go to **All operations** > **Policies**
+6. Add the JWT validation policy in the `<inbound>` section after `<base />`:
 ```xml
 <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
     <openid-config url="https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0/.well-known/openid-configuration" />
     <audiences>
-        <audience>api://YOUR_API_CLIENT_ID</audience>
+        <audience>api://YOUR_APIM_AUTH_CLIENT_ID</audience>
     </audiences>
     <required-claims>
         <claim name="scp" match="any">
@@ -141,23 +242,17 @@ Once the OAuth 2.0 service is created, you'll need to add your client credential
     </required-claims>
 </validate-jwt>
 ```
+7. Click **Save**
 
-   - Replace `YOUR_TENANT_ID` with your Azure AD tenant ID
-   - Replace `YOUR_API_CLIENT_ID` with the Application (client) ID of your API app registration
-   - Note: The policy uses the v2.0 endpoint for OpenID configuration
-
-6. Click **Save**
-
-#### Create a Subscription Key for the MVC Client
+### 6. Create a Subscription for MVC Client
 
 1. Go to **Subscriptions** > **Add Subscription**
-2. Enter a name and select a scope
-3. Note down the **Primary Key** and **Secondary Key**
+2. Enter a name and select the appropriate scope (API or Product)
+3. Note the **Primary Key** for use in your MVC client
 
-### 4. Configure the MVC Client
+### 7. Configure MVC Client
 
-Update the `appsettings.json` in the MVC client project:
-
+1. Update `appsettings.json`:
 ```json
 {
   "ApiSettings": {
@@ -167,81 +262,11 @@ Update the `appsettings.json` in the MVC client project:
 }
 ```
 
-### 5. Detailed OAuth 2.0 Client Configuration
+### 8. Deploy the APIs to Azure
 
-When setting up your MVC client to work with the OAuth 2.0 protected API, you'll need the following information from your API Management OAuth 2.0 service:
-
-#### OAuth 2.0 Configuration Details
-
-Based on the OAuth 2.0 service you've set up in API Management, make note of the following values:
-
-1. **Client ID**: This is the Application (client) ID from your Azure AD client app registration (e.g., `a3384a94-0145-4fb6-a5c6-634b2bba2397`)
-
-2. **Client Secret**: The secret value generated in the Azure AD app registration
-
-3. **Authorization Endpoint URL**: The URL for authorization requests
-   - Example: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/authorize`
-
-4. **Token Endpoint URL**: The URL for obtaining tokens
-   - Example: `https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token`
-
-5. **Default Scope**: The scope required for accessing the API
-   - Example: `api://YOUR_API_CLIENT_ID/weather.read` or a custom scope like `api://71efe159-bcc2-4797-8d33-84fb2ad8c069/weather.read`
-
-6. **Redirect URI**: The URI where users will be redirected after authentication
-   - Configure this in your Azure AD app registration and in your MVC client
-
-#### Integrating OAuth 2.0 in Your MVC Client
-
-Add the following to your `Startup.cs` or `Program.cs` file:
-
-```csharp
-// In Program.cs
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = OpenIdConnectDefaults.AuthenticationScheme;
-})
-.AddCookie()
-.AddOpenIdConnect(options =>
-{
-    options.ClientId = Configuration["Authentication:ClientId"];
-    options.ClientSecret = Configuration["Authentication:ClientSecret"];
-    options.Authority = Configuration["Authentication:Authority"];
-    options.ResponseType = "code";
-    options.SaveTokens = true;
-    options.Scope.Add("openid");
-    options.Scope.Add("profile");
-    options.Scope.Add("api://YOUR_API_CLIENT_ID/weather.read"); // Add your API scope
-    options.GetClaimsFromUserInfoEndpoint = true;
-});
-
-// In your WeatherService.cs
-public async Task<IEnumerable<WeatherForecast>> GetWeatherForecastAsync(string accessToken)
-{
-    _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-    _httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", _apiSettings.ApiKey);
-    
-    var response = await _httpClient.GetAsync($"{_apiSettings.BaseUrl}/weather");
-    // Process response...
-}
-```
-
-Update your `appsettings.json` with these settings:
-
-```json
-{
-  "ApiSettings": {
-    "BaseUrl": "https://YOUR_APIM_NAME.azure-api.net",
-    "ApiKey": "YOUR_SUBSCRIPTION_KEY"
-  },
-  "Authentication": {
-    "ClientId": "YOUR_CLIENT_ID",
-    "ClientSecret": "YOUR_CLIENT_SECRET",
-    "Authority": "https://login.microsoftonline.com/YOUR_TENANT_ID"
-  }
-}
-```
+1. Publish both API projects to Azure App Service
+2. Update the Swagger OAuth 2.0 redirect URLs in Azure AD to include the deployed URLs
+3. Test the APIs through both direct access and via API Management
 
 ## Running the Solution
 
@@ -472,177 +497,724 @@ If API Management is rejecting tokens with 401 Unauthorized errors:
 - Check that your audience and required claims match what's in the token
 - You can inspect tokens using [jwt.ms](https://jwt.ms) to debug claim issues
 
-#### Testing OAuth 2.0 Configuration
+#### Troubleshooting JWT Validation Policy Errors
 
-To verify your OAuth 2.0 setup is working correctly:
+If you encounter errors when setting up the JWT validation policy like:
+- "Policy section is not allowed in the specified scope" for elements like 'openid-config', 'audiences', or 'required-claims'
 
-1. Use the API Management Developer Portal's built-in console:
-   - Navigate to your API in the Developer Portal
-   - Click "Try it"
-   - Select your OAuth 2.0 server from the authorization dropdown
-   - Follow the authentication flow
+These issues typically occur for the following reasons:
 
-2. Use Postman:
-   - Create a new request to your API endpoint
-   - Under the Authorization tab, select "OAuth 2.0"
-   - Configure the OAuth 2.0 settings with your client ID, secret, and endpoints
-   - Request a new token and send your API request
+1. **Wrong Scope Level**: 
+   - The policy might be applied at the incorrect scope level (e.g., at the product level instead of the API operation level)
+   - Solution: Make sure to apply the policy at the "All operations" level for your API
 
-### 9. Important Notes on OAuth 2.0 Configuration Flow
+2. **XML Structure Issues**:
+   - The policy XML elements must be properly nested within the `<validate-jwt>` element
+   - Make sure your policy editor shows the full policy XML structure including the `<inbound>` section
+   - Some policy editors only show the section you're modifying, which can cause confusion
 
-When setting up OAuth 2.0 in Azure API Management, it's important to understand the relationship between different configuration sections:
+3. **Syntax Issues**:
+   - Make sure there are no extra spaces or special characters in your XML
+   - Ensure all opening tags have matching closing tags
+   - Check for proper nesting of XML elements
 
-1. **Developer Portal OAuth 2.0 Setup → API Security Settings**
-   
-   You must first configure the OAuth 2.0 server in the Developer Portal section before you can use it in your API security settings:
-   
-   - First: Configure OAuth 2.0 in **Developer portal > OAuth 2.0 + OpenID Connect**
-   - Then: Use that OAuth 2.0 server in **APIs > [Your API] > Settings > Security > User authorization > OAuth 2.0**
+4. **Policy Editor Mode**:
+   - If using the full XML editor view, ensure you include the `<base />` tag to inherit policies from parent scopes
+   - If using the section editor view, you only need to add the `<validate-jwt>` element and its contents
 
-   ![API Security Settings - OAuth 2.0 Server Selection](images/api_oauth_security.png)
+Example of a correct policy structure:
 
-   If your OAuth 2.0 server doesn't appear in the dropdown when configuring API security, it means either:
-   - The OAuth 2.0 server wasn't properly created in the Developer Portal
-   - There was an error in the OAuth 2.0 server configuration (check for any validation errors)
-   - You need to refresh the page to see the newly created OAuth 2.0 server
-
-2. **OAuth 2.0 Server Configuration → JWT Validation Policy**
-
-   When using APIM to validate tokens (APIM Auth approach), ensure the JWT validation policy matches the OAuth 2.0 server configuration:
-   - The audience in the JWT validation policy should match the client ID in your Azure AD app registration
-   - The required claims should match the scopes you've defined in your OAuth 2.0 server
-   - Use the correct version (v1.0 or v2.0) consistently across all configuration points
-
-### 10. Deploying from Different IDEs
-
-#### Deploying from Visual Studio
-
-Visual Studio provides integrated deployment tools for Azure:
-
-1. **Right-click on the Project** in Solution Explorer and select **Publish**
-2. Select **Azure** as the publish target
-3. Choose the appropriate Azure target:
-   - **Azure App Service** for the API projects
-   - You can create a new App Service or select an existing one
-4. Configure the App Service details:
-   - Choose your subscription
-   - Select a resource group or create a new one
-   - Name your App Service
-   - Choose a hosting plan
-5. Configure **Advanced** settings:
-   - For the API projects, ensure the "Configuration" is set to "Release"
-   - Make sure "Deploy as a self-contained application" is checked if needed
-6. Click **Save** and then **Publish**
-7. Visual Studio will build and deploy your application
-8. After deployment, Visual Studio will open a browser to your newly deployed API
-9. Verify the API is working by navigating to the Swagger endpoint (e.g., `/swagger/index.html`)
-
-#### Deploying from Visual Studio Code
-
-If you're using VS Code, you can deploy using the Azure App Service extension:
-
-1. **Install the Azure Extensions**:
-   - Open the Extensions panel (Ctrl+Shift+X)
-   - Search for "Azure Tools" or "Azure App Service" and install it
-   - Sign in to your Azure account through VS Code
-
-2. **Build your application**:
-   ```powershell
-   dotnet publish -c Release
-   ```
-
-3. **Deploy from VS Code**:
-   - Open the Azure extension panel (look for the Azure icon in the Activity Bar)
-   - Navigate to the App Service section
-   - Right-click on your subscription and select "Create new Web App..."
-   - Follow the prompts to create a new App Service:
-     - Enter a globally unique name
-     - Select .NET 8 runtime
-     - Choose a location
-     - Select a pricing tier
-   - Once created, right-click on the new App Service and select "Deploy to Web App..."
-   - Choose the folder containing your published files (usually under `bin/Release/net8.0/publish`)
-   - Confirm the deployment
-
-4. **Alternatively, use Azure CLI from VS Code Terminal**:
-   ```powershell
-   # Login to Azure
-   az login
-
-   # Create a resource group if you don't have one
-   az group create --name YourResourceGroup --location westus2
-
-   # Create an App Service Plan
-   az appservice plan create --name YourPlan --resource-group YourResourceGroup --sku B1
-
-   # Create the Web App
-   az webapp create --name YourApiName --resource-group YourResourceGroup --plan YourPlan --runtime "dotnet:8"
-
-   # Deploy from a published folder
-   cd YourProject
-   dotnet publish -c Release
-   az webapp deploy --resource-group YourResourceGroup --name YourApiName --src-path bin/Release/net8.0/publish --type zip
-   ```
-
-5. **Verify your deployment** by navigating to `https://your-api-name.azurewebsites.net/swagger`
-
-Remember to update your application settings after deployment to include all the required configuration values for OAuth 2.0, such as tenant ID, client ID, and client secret.
-
-### 11. Configuring Azure App Service Settings
-
-After deploying your APIs to Azure App Service, you need to configure the application settings to match your environment:
-
-#### Setting Configuration Values in Azure Portal
-
-1. Go to the Azure Portal and navigate to your App Service
-2. Go to **Settings** > **Configuration**
-3. Under the **Application settings** tab, add the following key-value pairs:
-   
-   **For ApimSample.Api**:
-   - `Authentication:Authority`: `https://login.microsoftonline.com/YOUR_TENANT_ID`
-   - `Authentication:Audience`: `api://YOUR_API_CLIENT_ID`
-   - `Authentication:SwaggerClientId`: `YOUR_SWAGGER_CLIENT_ID`
-   
-   **For ApimSample.MvcClient** (if deployed to Azure):
-   - `ApiSettings:BaseUrl`: `https://YOUR_APIM_NAME.azure-api.net`
-   - `ApiSettings:ApiKey`: `YOUR_SUBSCRIPTION_KEY`
-   - `Authentication:ClientId`: `YOUR_CLIENT_ID`
-   - `Authentication:ClientSecret`: `YOUR_CLIENT_SECRET`
-   - `Authentication:Authority`: `https://login.microsoftonline.com/YOUR_TENANT_ID`
-
-4. Click **Save** to apply the settings
-
-#### Setting Configuration Values with Visual Studio
-
-If you're deploying from Visual Studio:
-
-1. In the **Publish** wizard, after selecting your target, click on **Edit** next to the App Service configuration
-2. Go to the **Settings** tab
-3. Expand the **File Publish Options** section
-4. Check **Remove additional files at destination** if you want a clean deployment
-5. Expand your project section (e.g., ApimSample.Api)
-6. Add your application settings in the key-value editor
-7. Save your settings and continue with the publish process
-
-#### Setting Configuration Values with Azure CLI
-
-You can also set application settings using Azure CLI:
-
-```powershell
-# For ApimSample.Api
-az webapp config appsettings set --resource-group YourResourceGroup --name YourApiAppName --settings Authentication:Authority="https://login.microsoftonline.com/YOUR_TENANT_ID" Authentication:Audience="api://YOUR_API_CLIENT_ID" Authentication:SwaggerClientId="YOUR_SWAGGER_CLIENT_ID"
-
-# For ApimSample.MvcClient (if deployed to Azure)
-az webapp config appsettings set --resource-group YourResourceGroup --name YourMvcAppName --settings ApiSettings:BaseUrl="https://YOUR_APIM_NAME.azure-api.net" ApiSettings:ApiKey="YOUR_SUBSCRIPTION_KEY" Authentication:ClientId="YOUR_CLIENT_ID" Authentication:ClientSecret="YOUR_CLIENT_SECRET" Authentication:Authority="https://login.microsoftonline.com/YOUR_TENANT_ID"
+```xml
+<policies>
+    <inbound>
+        <base />
+        <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
+            <openid-config url="https://login.microsoftonline.com/60b20c52-6462-4ab8-b261-32d173b5e51c/v2.0/.well-known/openid-configuration" />
+            <audiences>
+                <audience>api://1efe159c-bcc2-4797-8d33-84fb2ad8c069</audience>
+            </audiences>
+            <required-claims>
+                <claim name="scp" match="any">
+                    <value>weather.read</value>
+                </claim>
+            </required-claims>
+        </validate-jwt>
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
 ```
 
-#### Using Azure Key Vault for Sensitive Settings
+## Common Setup Issues and Troubleshooting
 
-For production environments, consider storing sensitive settings like client secrets in Azure Key Vault:
+### Hardcoded Client IDs in Code
 
-1. Create a Key Vault in the Azure Portal
-2. Add your secrets to the Key Vault
-3. Configure your App Service to use a Managed Identity
-4. Grant the Managed Identity permission to access secrets in Key Vault
-5. Use Key Vault references in your application settings:
-   - `@Microsoft.KeyVault(SecretUri=https://YourKeyVault.vault.azure.net/secrets/YourSecret)`
+If you examine the `Program.cs` file in the ApimSample.Api project, you might notice that there's a hardcoded client ID:
+
+```csharp
+Scopes = new Dictionary<string, string>
+{
+    { "api://1efe159c-bcc2-4797-8d33-84fb2ad8c069/weather.read", "Read weather data" }
+}
+```
+
+**Solution**: Replace this with your actual client ID. The correct approach is to use configuration:
+
+```csharp
+Scopes = new Dictionary<string, string>
+{
+    { $"api://{builder.Configuration["Authentication:Audience"]}/weather.read", "Read weather data" }
+}
+```
+
+### Swagger Authorization Error: "AADSTS500013: Resource identifier is not provided"
+
+When clicking "Authorize" in Swagger UI, you might see this Azure AD error.
+
+**Problem**: The scope in the Swagger UI OAuth configuration is incorrectly formatted or doesn't match your Azure AD app registration.
+
+**Solution**: Ensure your `Program.cs` file has the correct audience and scope format:
+
+```csharp
+// Get client ID from configuration
+string clientId = builder.Configuration["Authentication:Audience"]?.Replace("api://", "");
+
+c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+{
+    // ...other properties...
+    Flows = new OpenApiOAuthFlows
+    {
+        Implicit = new OpenApiOAuthFlow
+        {
+            // ...other properties...
+            Scopes = new Dictionary<string, string>
+            {
+                { $"api://{clientId}/weather.read", "Read weather data" }
+            }
+        }
+    }
+});
+```
+
+### APIM JWT Validation Policy Error: "Policy scope is not allowed in this section"
+
+This error typically occurs when trying to add the JWT validation policy in the wrong section.
+
+**Solution**: Ensure you're adding the policy at the API level's "All operations" scope. The full policy XML should include:
+
+```xml
+<policies>
+    <inbound>
+        <base />
+        <validate-jwt>
+            <!-- Policy details -->
+        </validate-jwt>
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
+```
+
+### API Returns 401 Unauthorized Even With Valid Token
+
+**Possible causes**:
+
+1. **Audience mismatch**: 
+   - The token's audience doesn't match what the API expects
+   - **Solution**: Ensure the `Audience` in appsettings.json matches your Azure AD app's Application ID URI
+
+2. **Scope mismatch**:
+   - Required scope in JWT validation policy doesn't match the scope in the token
+   - **Solution**: Check the `scp` claim in the token (using [jwt.ms](https://jwt.ms)) and match it in the policy
+
+3. **Authority mismatch**:
+   - Using v1.0 endpoint in one place and v2.0 in another
+   - **Solution**: Be consistent with endpoints. For v2.0:
+     - Authority: `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0`
+     - OpenID config: `https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0/.well-known/openid-configuration`
+
+### MVC Client Error: "Access is denied due to invalid credentials"
+
+**Possible causes**:
+
+1. **Missing Subscription Key**: 
+   - **Solution**: Ensure the `Ocp-Apim-Subscription-Key` header is added to HTTP requests:
+
+```csharp
+client.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", _configuration["ApiSettings:ApiKey"]);
+```
+
+2. **Invalid Endpoint**:
+   - **Solution**: Verify the API base URL and endpoint path:
+
+```csharp
+// For Direct Auth API
+string endpoint = "/direct-auth/weatherforecast";
+
+// For APIM Auth API
+string endpoint = "/apim-auth/weatherforecast";
+```
+
+### "No OpenID Connect Discovery document found" Error
+
+This occurs when the OpenID configuration URL in the JWT validation policy is incorrect.
+
+**Solution**: 
+1. Verify the tenant ID is correct
+2. Ensure you're using the correct version endpoint (v1.0 vs v2.0)
+3. Test the URL in a browser to confirm it returns JSON:
+
+```
+https://login.microsoftonline.com/YOUR_TENANT_ID/v2.0/.well-known/openid-configuration
+```
+
+## Implementation Code Examples
+
+#### ApimSample.Api (Direct Auth) - Program.cs
+
+```csharp
+// Configure JWT Authentication in the API
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = builder.Configuration["Authentication:Authority"];
+        options.Audience = builder.Configuration["Authentication:Audience"];
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true
+        };
+    });
+
+// Configure Swagger with OAuth 2.0
+builder.Services.AddSwaggerGen(c =>
+{
+    c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.OAuth2,
+        Flows = new OpenApiOAuthFlows
+        {
+            Implicit = new OpenApiOAuthFlow
+            {
+                AuthorizationUrl = new Uri($"{builder.Configuration["Authentication:Authority"]}/oauth2/authorize"),
+                TokenUrl = new Uri($"{builder.Configuration["Authentication:Authority"]}/oauth2/token"),
+                Scopes = new Dictionary<string, string>
+                {
+                    { $"api://{builder.Configuration["Authentication:Audience"]}/weather.read", "Read weather data" }
+                }
+            }
+        }
+    });
+    
+    // Ensure Swagger UI requires OAuth
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "oauth2" }
+            },
+            new[] { "api://[YOUR-CLIENT-ID]/weather.read" }
+        }
+    });
+});
+
+// Ensure authentication middleware is added to the pipeline
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+#### ApimSample.Api (Direct Auth) - WeatherForecastController.cs
+
+```csharp
+[ApiController]
+[Route("[controller]")]
+[Authorize] // Controller requires authentication
+public class WeatherForecastController : ControllerBase
+{
+    // Implementation
+}
+```
+
+#### ApimSample.ApimSecuredApi (APIM Auth) - Program.cs
+
+```csharp
+// No authentication setup in the API
+// Just normal controller configuration
+builder.Services.AddControllers();
+
+// Swagger only shows API Management subscription key
+builder.Services.AddSwaggerGen(c =>
+{
+    c.AddSecurityDefinition("apiManagement", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Header,
+        Name = "Ocp-Apim-Subscription-Key",
+        Description = "API Management subscription key. Authentication is handled by Azure API Management."
+    });
+});
+
+// No authentication middleware needed
+// app.UseAuthentication(); - Not needed
+```
+
+#### ApimSample.ApimSecuredApi (APIM Auth) - WeatherForecastController.cs
+
+```csharp
+[ApiController]
+[Route("[controller]")]
+// No [Authorize] attribute needed - authentication handled by APIM
+public class WeatherForecastController : ControllerBase
+{
+    // Implementation
+}
+```
+
+#### APIM JWT Validation Policy (for ApimSample.ApimSecuredApi)
+
+```xml
+<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
+    <openid-config url="https://login.microsoftonline.com/[YOUR-TENANT-ID]/v2.0/.well-known/openid-configuration" />
+    <audiences>
+        <audience>api://[YOUR-API-CLIENT-ID]</audience>
+    </audiences>
+    <required-claims>
+        <claim name="scp" match="any">
+            <value>weather.read</value>
+        </claim>
+    </required-claims>
+</validate-jwt>
+```
+
+## Azure Deployment and Security Best Practices
+
+When deploying this solution to production environments, consider the following best practices:
+
+### Infrastructure as Code (IaC)
+
+Use Infrastructure as Code to deploy your API Management instance and related resources:
+
+#### Bicep Example for API Management with OAuth
+
+```bicep
+param location string = resourceGroup().location
+param apiManagementName string
+param publisherEmail string
+param publisherName string
+
+// API Management instance
+resource apiManagement 'Microsoft.ApiManagement/service@2021-08-01' = {
+  name: apiManagementName
+  location: location
+  sku: {
+    name: 'Developer'
+    capacity: 1
+  }
+  properties: {
+    publisherEmail: publisherEmail
+    publisherName: publisherName
+  }
+}
+
+// Create the OAuth 2.0 server
+resource oauthServer 'Microsoft.ApiManagement/service/authorizationServers@2021-08-01' = {
+  parent: apiManagement
+  name: 'apim-oauth'
+  properties: {
+    displayName: 'API OAuth Server'
+    clientRegistrationEndpoint: 'https://portal.azure.com'
+    authorizationEndpoint: 'https://login.microsoftonline.com/${tenant().tenantId}/oauth2/v2.0/authorize'
+    tokenEndpoint: 'https://login.microsoftonline.com/${tenant().tenantId}/oauth2/v2.0/token'
+    grantTypes: [
+      'authorizationCode'
+    ]
+    clientAuthenticationMethod: [
+      'Body'
+    ]
+    bearerTokenSendingMethods: [
+      'authorizationHeader'
+    ]
+    defaultScope: 'api://${clientId}/weather.read'
+    clientId: clientId
+    clientSecret: clientSecret
+  }
+}
+
+// Import an API with OAuth 2.0 protection
+resource api 'Microsoft.ApiManagement/service/apis@2021-08-01' = {
+  parent: apiManagement
+  name: 'direct-auth-api'
+  properties: {
+    displayName: 'Direct Auth API'
+    path: 'direct-auth'
+    protocols: [
+      'https'
+    ]
+    subscriptionRequired: true
+    authenticationSettings: {
+      oAuth2AuthenticationSettings: [
+        {
+          authorizationServerId: oauthServer.name
+        }
+      ]
+      openidAuthenticationSettings: []
+    }
+  }
+}
+```
+
+### Security Recommendations
+
+1. **Use Managed Identities**:
+   - Configure Managed Identities for API Management to access Azure Key Vault
+   - Store client secrets and subscription keys in Key Vault
+   - Example Key Vault integration:
+
+```csharp
+// In API project
+builder.Configuration.AddAzureKeyVault(
+    new Uri($"https://{builder.Configuration["KeyVaultName"]}.vault.azure.net/"),
+    new DefaultAzureCredential());
+```
+
+2. **Implement Token Validation Best Practices**:
+   - Validate token issuer
+   - Validate audience
+   - Validate token lifetime
+   - Validate required claims
+
+3. **Network Security**:
+   - Use Private Endpoints for API Management
+   - Configure NSGs to restrict traffic
+   - Deploy API Management in Internal mode for high-security scenarios
+
+4. **APIM Policy Security**:
+   - Use policies to enforce IP restrictions
+   - Add rate limiting to prevent abuse
+   - Implement request validation to prevent attacks
+   - Example secure policy:
+
+```xml
+<policies>
+    <inbound>
+        <base />
+        <ip-filter action="allow">
+            <address-range from="20.193.15.0" to="20.193.15.255" />
+        </ip-filter>
+        <rate-limit calls="5" renewal-period="60" />
+        <validate-jwt header-name="Authorization" failed-validation-httpcode="401">
+            <!-- JWT validation details -->
+        </validate-jwt>
+    </inbound>
+</policies>
+```
+
+### CI/CD Pipeline Recommendations
+
+1. Use Azure DevOps or GitHub Actions to automate deployments
+2. Use Service Principals with least-privilege access
+3. Include API Management deployment in your CI/CD pipeline
+4. Example GitHub Actions workflow:
+
+```yaml
+name: Deploy API Management
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    - name: Deploy API Management
+      uses: azure/arm-deploy@v1
+      with:
+        resourceGroupName: ${{ secrets.RESOURCE_GROUP }}
+        template: ./infra/apim.bicep
+        parameters: 'apiManagementName=${{ secrets.APIM_NAME }} publisherEmail=${{ secrets.PUBLISHER_EMAIL }} publisherName=${{ secrets.PUBLISHER_NAME }}'
+```
+
+### Monitoring and Logging
+
+1. Enable Application Insights for API Management
+2. Configure diagnostic settings to log all requests
+3. Set up alerts for authentication failures
+4. Monitor token validation errors
+
+### Authentication Flow Security
+
+1. Use authorization code flow with PKCE for public clients
+2. Use client credentials flow for service-to-service
+3. Implement token refresh handling
+4. Store refresh tokens securely
+
+### URL and Configuration Summary
+
+The following tables summarize the key differences between the two API projects:
+
+#### URLs and Endpoints
+
+| Purpose | ApimSample.Api (Direct Auth) | ApimSample.ApimSecuredApi (APIM Auth) |
+|---------|---------------|---------------------------|
+| **API Base URL** | `https://[api-app-name].azurewebsites.net` | `https://[apimsecured-app-name].azurewebsites.net` |
+| **Swagger URL** | `https://[api-app-name].azurewebsites.net/swagger` | `https://[apimsecured-app-name].azurewebsites.net/swagger` |
+| **APIM URL** | `https://[your-apim-name].azure-api.net/direct-auth` | `https://[your-apim-name].azure-api.net/apim-auth` |
+| **Swagger Redirect** | `https://[api-app-name].azurewebsites.net/swagger/oauth2-redirect.html` | N/A - Authentication handled by APIM |
+| **Authority URL** | `https://login.microsoftonline.com/[DirectAuth-TenantID]` | `https://login.microsoftonline.com/[ApimAuth-TenantID]` |
+| **OpenID Config** | `https://login.microsoftonline.com/[DirectAuth-TenantID]/v2.0/.well-known/openid-configuration` | `https://login.microsoftonline.com/[ApimAuth-TenantID]/v2.0/.well-known/openid-configuration` |
+| **Token Endpoint** | `https://login.microsoftonline.com/[DirectAuth-TenantID]/oauth2/v2.0/token` | `https://login.microsoftonline.com/[ApimAuth-TenantID]/oauth2/v2.0/token` |
+| **Authorization Endpoint** | `https://login.microsoftonline.com/[DirectAuth-TenantID]/oauth2/v2.0/authorize` | `https://login.microsoftonline.com/[ApimAuth-TenantID]/oauth2/v2.0/authorize` |
+
+#### Configuration and Implementation Differences
+
+| Feature | ApimSample.Api (Direct Auth) | ApimSample.ApimSecuredApi (APIM Auth) |
+|---------|---------------|---------------------------|
+| **Authentication Location** | Inside API code (middleware) | APIM policy only |
+| **Token Validation** | ASP.NET Core JWT Bearer middleware | APIM validate-jwt policy |
+| **Controller Attribute** | `[Authorize]` required | No attribute needed |
+| **AppSettings Auth Config** | Required | Not required |
+| **OAuth 2.0 Server in APIM** | Pass-through | Active validation |
+| **Swagger Auth UI** | OAuth 2.0 flow | API Key only |
+| **Error Responses** | Generated by API | Generated by APIM |
+| **Scope** | `api://[DirectAuth-ClientID]/weather.read` | `api://[ApimAuth-ClientID]/weather.read` |
+| **MVC Client Endpoint** | `/direct-auth/weatherforecast` | `/apim-auth/weatherforecast` |
+
+#### App Registration IDs vs. URLs
+
+It's important to keep track of which client IDs and URLs belong to which API:
+
+1. **DirectAuth-ClientID**: The Application (client) ID from the ApimSample.Api app registration
+   - Used in: 
+     - API's appsettings.json as `Authentication:Audience` 
+     - Swagger UI OAuth config
+     - APIM OAuth 2.0 server definition for Direct Auth API
+
+2. **ApimAuth-ClientID**: The Application (client) ID from the ApimSample.ApimSecuredApi app registration
+   - Used in:
+     - APIM JWT validation policy `<audience>` tag
+     - APIM OAuth 2.0 server definition for APIM Auth API
+
+3. **Swagger-ClientID**: The Application (client) ID from the client app registration
+   - Used in:
+     - API's appsettings.json as `Authentication:SwaggerClientId`
+     - APIM OAuth 2.0 server client configuration
+
+## Authentication Flow Comparison
+
+### Direct Auth Flow (ApimSample.Api)
+
+The Direct Auth approach follows this sequence:
+
+1. **Client obtains token**:
+   ```
+   Client App → Azure AD → Client App (with token)
+   ```
+
+2. **Client calls API through APIM**:
+   ```
+   Client App → APIM (forwards token) → API → API validates token → API processes request
+   ```
+
+3. **Authentication responsibility**:
+   - APIM: Forwards the token, doesn't validate it
+   - API: Validates the token using ASP.NET Core JWT Bearer middleware
+
+4. **Code dependencies**:
+   - Requires Microsoft.AspNetCore.Authentication.JwtBearer package
+   - Requires authentication configuration in appsettings.json
+   - Requires [Authorize] attributes on controllers
+
+### APIM Auth Flow (ApimSample.ApimSecuredApi)
+
+The APIM Auth approach follows this sequence:
+
+1. **Client obtains token**:
+   ```
+   Client App → Azure AD → Client App (with token)
+   ```
+
+2. **Client calls API through APIM**:
+   ```
+   Client App → APIM validates token → If valid → API → API processes request
+                                     → If invalid → Error returned (API never called)
+   ```
+
+3. **Authentication responsibility**:
+   - APIM: Validates the token using JWT validation policy
+   - API: No authentication logic, receives only pre-validated requests
+
+4. **Code dependencies**:
+   - No authentication packages needed in the API project
+   - No authentication configuration in appsettings.json
+   - No [Authorize] attributes on controllers
+
+### Side-by-Side Comparison
+
+```
+┌─────────────┐                  ┌─────────────┐                  ┌─────────────┐
+│  Client App │                  │  Client App │                  │  Azure AD   │
+└──────┬──────┘                  └──────┬──────┘                  └──────┬──────┘
+       │                                │                                │
+       │                                │      Authentication request    │
+       │                                │────────────────────────────────>
+       │                                │                                │
+       │                                │      Token response            │
+       │                                │<────────────────────────────────
+       │                                │                                │
+       │                                │                                │
+┌──────┴──────┐                  ┌──────┴──────┐                  ┌──────┴──────┐
+│  DIRECT AUTH│                  │  APIM AUTH  │                  │             │
+└──────┬──────┘                  └──────┬──────┘                  │             │
+       │                                │                                │
+       │                                │                                │
+       │      API request with token    │      API request with token    │
+       │─────────────────────────────────────────────────────────────────>
+       │                                │                                │
+┌──────┴──────┐                  ┌──────┴──────┐                  ┌──────┴──────┐
+│    APIM     │                  │    APIM     │                  │    APIM     │
+│  (passes    │                  │  (validates │                  │ (validation │
+│   token)    │                  │   token)    │                  │  fails)     │
+└──────┬──────┘                  └──────┬──────┘                  └──────┬──────┘
+       │                                │                                │
+       │                                │                                │
+       │      Forward request           │      Forward request           │      Return 401
+       │      with token                │      (token validated)         │      Unauthorized
+       ▼                                ▼                                ▼
+┌─────────────┐                  ┌─────────────┐                  ┌─────────────┐
+│     API     │                  │     API     │                  │  Client App │
+│  (validates │                  │ (no auth    │                  │ (receives   │
+│   token)    │                  │  logic)     │                  │  error)     │
+└─────────────┘                  └─────────────┘                  └─────────────┘
+```
+
+### When to Choose Each Approach
+
+#### Advantages of Direct Auth (ApimSample.Api)
+
+1. **Fine-grained control**: API has full control over authentication and authorization logic
+2. **Flexibility**: Can use the same authentication whether accessed directly or through APIM
+3. **Advanced scenarios**: Supports complex authorization based on claims and policies
+4. **Middleware features**: Takes advantage of ASP.NET Core authentication middleware capabilities
+5. **Easier local testing**: Works locally without configuring APIM
+
+#### Advantages of APIM Auth (ApimSample.ApimSecuredApi)
+
+1. **Simplified API code**: No authentication code needed in the API itself
+2. **Centralized security**: All security policies managed in one place (APIM)
+3. **Consistent enforcement**: Same policies applied across multiple APIs
+4. **Enhanced performance**: Authentication failures rejected at the gateway, saving backend resources
+5. **Policy flexibility**: Easy to update security requirements without changing API code
+
+## Quick Reference Cheat Sheet
+
+### App Registration and Configuration Cheat Sheet
+
+Use this quick reference to keep track of which values go where:
+
+#### ApimSample.Api (Direct Auth)
+
+| Setting | Value | Where to Use |
+|---------|-------|--------------|
+| **Azure AD App Name** | `ApimSample.Api` | App registration |
+| **Client ID** | `[generated-id]` | Save as `DirectAuth-ClientID` |
+| **Tenant ID** | `[your-tenant-id]` | Save as `DirectAuth-TenantID` |
+| **Scope** | `api://[DirectAuth-ClientID]/weather.read` | APIM OAuth server, Swagger UI |
+| **Authority** | `https://login.microsoftonline.com/[DirectAuth-TenantID]` | API appsettings.json |
+| **Audience** | `api://[DirectAuth-ClientID]` | API appsettings.json |
+| **APIM URL suffix** | `direct-auth` | APIM API configuration |
+
+#### appsettings.json Example for Direct Auth API
+
+```json
+{
+  "Authentication": {
+    "Authority": "https://login.microsoftonline.com/60b20c52-6462-4ab8-b261-32d173b5e51c",
+    "Audience": "api://1efe159c-bcc2-4797-8d33-84fb2ad8c069",
+    "SwaggerClientId": "a3384a94-0145-4fb6-a5c6-634b2bba2397"
+  }
+}
+```
+
+#### ApimSample.ApimSecuredApi (APIM Auth)
+
+| Setting | Value | Where to Use |
+|---------|-------|--------------|
+| **Azure AD App Name** | `ApimSample.ApimSecuredApi` | App registration |
+| **Client ID** | `[generated-id]` | Save as `ApimAuth-ClientID` |
+| **Tenant ID** | `[your-tenant-id]` | Save as `ApimAuth-TenantID` |
+| **Scope** | `api://[ApimAuth-ClientID]/weather.read` | APIM OAuth server, JWT policy |
+| **OpenID config URL** | `https://login.microsoftonline.com/[ApimAuth-TenantID]/v2.0/.well-known/openid-configuration` | JWT validation policy |
+| **Audience** | `api://[ApimAuth-ClientID]` | JWT validation policy |
+| **APIM URL suffix** | `apim-auth` | APIM API configuration |
+
+#### JWT Validation Policy for APIM Auth API
+
+```xml
+<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
+    <openid-config url="https://login.microsoftonline.com/60b20c52-6462-4ab8-b261-32d173b5e51c/v2.0/.well-known/openid-configuration" />
+    <audiences>
+        <audience>api://1efe159c-bcc2-4797-8d33-84fb2ad8c069</audience>
+    </audiences>
+    <required-claims>
+        <claim name="scp" match="any">
+            <value>weather.read</value>
+        </claim>
+    </required-claims>
+</validate-jwt>
+```
+
+#### MVC Client (ApimSample.MvcClient)
+
+| Setting | Value | Where to Use |
+|---------|-------|--------------|
+| **APIM URL** | `https://[your-apim-name].azure-api.net` | MVC client appsettings.json |
+| **APIM Subscription Key** | `[your-subscription-key]` | MVC client appsettings.json |
+| **Direct Auth Endpoint** | `/direct-auth/weatherforecast` | WeatherService.cs |
+| **APIM Auth Endpoint** | `/apim-auth/weatherforecast` | WeatherService.cs |
+
+#### appsettings.json Example for MVC Client
+
+```json
+{
+  "ApiSettings": {
+    "BaseUrl": "https://your-apim-name.azure-api.net",
+    "ApiKey": "74d23bf46e2d44a3bc83e9e303412c0a"
+  }
+}
+```
+
+### Common Errors and Quick Fixes
+
+| Error | Likely Cause | Quick Fix |
+|-------|--------------|-----------|
+| "Resource identifier is not provided" | Incorrect scope format in Swagger | Update scope to match Azure AD registration |
+| "Invalid audience" | Token audience doesn't match API's expected audience | Ensure audience in token matches API's audience setting |
+| "Policy scope is not allowed" | JWT policy added at wrong scope level | Apply JWT validation policy at "All operations" scope |
+| "ClientRegistrationEndpoint should not be empty" | Missing client registration URL | Use `https://portal.azure.com` as placeholder |
+| 401 Unauthorized from API | Token validation failure | Check issuer, audience, and scope match between token and API |
+| 401 Unauthorized from APIM | Missing or invalid subscription key | Add `Ocp-Apim-Subscription-Key` header with proper key |

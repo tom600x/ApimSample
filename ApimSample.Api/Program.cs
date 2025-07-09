@@ -46,7 +46,7 @@ public class Program
                         TokenUrl = new Uri($"{builder.Configuration["Authentication:Authority"]}/oauth2/token"),
                         Scopes = new Dictionary<string, string>
                         {
-                            { "api://apim-sample-api/weather.read", "Read weather data" }
+                            { "api://1efe159c-bcc2-4797-8d33-84fb2ad8c069/weather.read", "Read weather data" }
                         }
                     }
                 }
@@ -59,7 +59,7 @@ public class Program
                     {
                         Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "oauth2" }
                     },
-                    new[] { "api://apim-sample-api/weather.read" }
+                    new[] { "api://1efe159c-bcc2-4797-8d33-84fb2ad8c069/weather.read" }
                 }
             });
         });
